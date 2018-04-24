@@ -20,9 +20,13 @@ def _valid_covariance(M):
         return False
     return True
 
-def _angular_fix(a):
+def angular_fix(a):
     fix = np.mod(np.mod(a,2*pi)+2*pi,2*pi)
-    fix[fix > pi] -= 2*pi
+    if np.isscalar(fix):
+        if fix > pi:
+            fix -= 2*pi
+    else:
+        fix[fix > pi] -= 2*pi
     return fix
 
 class FilterError(Exception):
@@ -189,8 +193,8 @@ class UnscentedKalmanFilter(object):
         ## Mean
         # Normalize all the angles in the sigma points
         if self._angle_mask is not None:
-            self._sigma_pts[self._angle_mask, :] = \
-                _angular_fix(self._sigma_pts[self._angle_mask, :])
+            states = self._sigma_pts[:self._ss,:]
+            states[self._angle_mask, :] = angular_fix(states[self._angle_mask, :])
             for i in range(self._ss):
                 row = self._sigma_pts[i, :]
                 if self._angle_mask[i]:
@@ -214,7 +218,7 @@ class UnscentedKalmanFilter(object):
         for j in range(pts.shape[1]):
             diff = pts[:,j] - mean
             if fix_angles:
-                diff = self._ang_fix(diff)
+                self._ang_fix(diff)
             if pts2 is not None:
                 diff2 = pts2[:,j] - mean2
             else:
@@ -228,13 +232,14 @@ class UnscentedKalmanFilter(object):
 
     def _ang_fix(self, v):
         """
-        Fix the angles in a matrix or vector to -pi..pi
+        Fix the angles in a vector to -pi..pi
+        This operates in place
         :return:
         """
         if self._angle_mask is None:
             return v
-        v[self._angle_mask] = _angular_fix(v[self._angle_mask])
-
+        v[self._angle_mask] = angular_fix(v[self._angle_mask])
+        return v
 
     @property
     def state_size(self):
@@ -262,6 +267,12 @@ class UnscentedKalmanFilter(object):
     @property
     def state(self):
         return self._state.copy()
+
+    @property
+    def angle_mask(self):
+        if self._angle_mask is None:
+            return None
+        return self._angle_mask.copy()
 
     @state.setter
     def state(self, x):

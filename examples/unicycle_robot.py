@@ -41,7 +41,7 @@ def predict_icc(state, noise, v, w, dt):
 
     # Corrupt the inputs with noise
     vc = v + v*Rv*dt
-    wc = w + w*Rv*dt
+    wc = w + w*Rw*dt
 
     # Find the displacement using corrupted inputs
     next_state = state + get_displacement(state[2],vc,wc,dt)
@@ -63,8 +63,8 @@ def measurement(state, noise):
     Rr,Rb = noise
 
     # Corrupt measurements with non-additive noise
-    range_c = max(0,range + Rr*range**2)
-    bearing_c = bearing + Rb*range**2
+    range_c = max(0,range + Rr)
+    bearing_c = bearing + Rb
 
     return np.array([range_c, bearing_c])
 
@@ -78,26 +78,38 @@ but the noise increases with the square of distance
 """
 
 # Process noise covariance
-RV = np.diag([1e-3, 1e-4])
+# RV = np.diag([1e-3, 1e-4])
+RV = np.diag([0.5,0.5])
 
 # Measurement noise covariance
-RN = np.diag([0.01, 0.001])
+RN = np.diag([0.01, 0.01])
 
 ukf = ukflib.UnscentedKalmanFilter(state_size=3,
                                    process_noise=RV,
-                                   measurement_noise=RN)
-
+                                   measurement_noise=RN,
+                                   init_covariance=np.eye(3)*0.01,
+                                   angle_mask=[0,0,1])
 
 
 # Generate a realistic trajectory using numerical integration
 # Suppose the robot smoothly changes its speed and angular velocity
 # Make up some speeds and angular velocities and interpolate between them
-speeds =   [0, 2.0,  1.0, 0.5, 0, 0]
-ang_vels = [0,  90,  -180,  -360, 0, 0]
-ang_vels = np.radians(ang_vels)
-times =    [0,1,2,3,4,5]
+
+true_inputs = np.array([
+    (0,   0,    0),
+    (0.75, 90,   1),
+    (1.0, -180, 2),
+    (0.5, -200, 3),
+    (0,  0,     4),
+    (0,  0,     5)
+])
+speeds =   true_inputs[:,0]
+ang_vels = np.radians(true_inputs[:,1])
+times = true_inputs[:,2]
 V = scipy.interpolate.interp1d(times, speeds)
 W = scipy.interpolate.interp1d(times, ang_vels)
+
+# Right hand side of state-space equations
 f = lambda x,t: np.array([V(t)*cos(x[2]), V(t)*sin(x[2]), W(t)])
 
 tf = 4
@@ -105,9 +117,12 @@ dt = 0.01
 T = np.arange(0,tf,dt)
 
 # The ground truth states
-X = scipy.integrate.odeint(f, [0,0,0], T)
+X_true = scipy.integrate.odeint(f, [0, 0, 0], T)
+X_ukf = []
+P_ukf = []
 
-for i, truth in enumerate(X):
+
+for i, truth in enumerate(X_true):
     t = T[i]
     input_v = V(t)
     input_w = W(t)
@@ -121,16 +136,38 @@ for i, truth in enumerate(X):
     b_std = sqrt(RN[1,1])
 
     # Fuzz it up with noise
-    range += random.gauss(0, r_std)*range**2
-    bearing += random.gauss(0, b_std)*range**2
+    range += random.gauss(0, r_std)
+    bearing += random.gauss(0, b_std)
 
     z = np.array([range, bearing])
     ukf.update(measurement, z)
 
+    X_ukf.append(ukf.state)
+    P_ukf.append(ukf.covariance)
 
-plt.plot(X[:,0],X[:,1])
+X_ukf = np.array(X_ukf)
+
+pstats = []
+for P in P_ukf:
+    e,_ = np.linalg.eig(P)
+    pstats.append(norm(e))
+pstats = np.array(pstats)
+
+plt.figure(1)
+plt.plot(X_true[:, 0], X_true[:, 1],label="Truth")
+plt.plot(X_ukf[:,0],X_ukf[:,1],label="UKF")
+plt.title("XY")
+plt.legend()
+
+plt.figure(2)
+plt.plot(T,X_true[:,2])
+plt.plot(T,X_ukf[:,2])
+plt.title("Orientation")
+
+plt.figure(3)
+plt.plot(T, pstats)
+plt.title("Covariance")
+
 plt.show()
-
-
 
 

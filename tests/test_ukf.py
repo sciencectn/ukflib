@@ -7,6 +7,7 @@ import numpy as np
 import numpy.testing as npt
 import random
 from numpy.linalg import inv
+from math import pi
 
 def random_covariance(n):
     pts = np.random.rand(n,n+1)
@@ -109,5 +110,23 @@ def test_kalman_filter_equivalence():
 
         npt.assert_almost_equal(ukf.state, x_p)
         npt.assert_almost_equal(ukf.covariance, P_p)
+
+@with_setup(setup)
+def test_angle_fixing():
+    """
+    Randomly add multiples of 2*pi to an angle and verify that nothing happens
+    :return:
+    """
+    Rv = 1.337e-2
+    Rn = random_covariance(1)
+    P0 = 1.2345e-3
+    ukf = ukflib.UnscentedKalmanFilter(1,Rv,Rn,
+                                       init_covariance=P0,
+                                       init_state=0,
+                                       angle_mask=[1])
+    ukf.predict(lambda x,v: x+0.01+random.randint(-10,10)*2*pi + v)
+    npt.assert_almost_equal(ukf.state, 0.01)
+    npt.assert_almost_equal(ukf.covariance, P0 + Rv)
+
 
 
