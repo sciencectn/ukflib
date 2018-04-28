@@ -55,7 +55,8 @@ class UnscentedKalmanFilter(object):
             init_covariance = np.eye(self._ss)
         else:
             init_covariance = np.atleast_2d(init_covariance)
-            assert init_covariance.shape[0]==state_size
+            assert init_covariance.shape[0]==state_size,\
+                f"The initial covariance should have the same dimension as the state size"
 
         self._angle_mask = None
         if angle_mask is not None:
@@ -162,9 +163,11 @@ class UnscentedKalmanFilter(object):
         Pxz = self._sigma_pt_covariance(self._sigma_pts[:self._ss,:],self._state,
                                         pts2=Z,mean2=zbar)
         K = Pxz.dot(np.linalg.inv(Pz))
-        self._state += K.dot(measurement - zbar)
+        innovation = measurement - zbar
+        self._state += K.dot(innovation)
         self._Pa[:self._ss,:self._ss] -= K.dot(Pz).dot(K.T)
         self._P_state = "plus"
+        return innovation
 
 
     def _get_sigma_points(self):
