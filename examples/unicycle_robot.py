@@ -6,7 +6,6 @@ from math import sin,cos, atan2, sqrt, radians
 from numpy.linalg import norm
 import scipy.interpolate
 import scipy.integrate
-import matplotlib.pyplot as plt
 import random
 from collections import defaultdict as ddict
 
@@ -39,39 +38,13 @@ def get_displacement(ts, v, omega, dt):
     return w
 
 
-def predict_icc(state, noise, v, w, dt):
-    """
-    Approximate the next state of the robot's motion using
-    the "instantaneous center of curvature" motion model
+def clip(value, val_range):
+    return max(min(value, val_range[1]), val_range[0])
 
-    :param state:
-    :param noise:
-    :param v: Speed
-    :param w: Angular velocity
-    :return:
-    """
-    Rv, Rw, Ra = noise
-
-    # Corrupt the inputs with noise
-    vc = v + v*Rv*dt
-    wc = w + w*Rw*dt
-
-    # Find the displacement using corrupted inputs
-    next_state = state + get_displacement(state[2],vc,wc,dt)
-
-    # Add a third bit of uncertainty to just the angle
-    # This prevents the orientation estimate from getting too confident
-    # when the robot is not turning
-    next_state[2] += Ra*dt
-    return next_state
-
-def clip(value, low, high):
-    return max(min(value, high), low)
-
-def predict_random_inputs(state, noise, dt, vmin, vmax, wmin, wmax):
+def predict_random_inputs(state, noise, dt, vrange, wrange):
     v,w = state[3:] + noise*dt
-    v = clip(v,vmin,vmax)
-    w = clip(w,wmin,wmax)
+    v = clip(v,vrange)
+    w = clip(w,wrange)
     next_state = state
     next_state[:3] += get_displacement(state[2],v,w,dt)
     # next_state[:3] += noise[:3]*dt
@@ -102,128 +75,180 @@ def measurement(state, noise):
     return np.array([range_c, bearing_c])
 
 
+def generate_random_trajectory_and_inputs(dt, vrange, wrange, num_points=20):
+    """
+    Generate a realistic trajectory using numerical integration
+    Suppose the robot smoothly changes its speed and angular velocity
+    Make up some speeds and angular velocities and interpolate between them
 
-# Process noise covariance
-# In this case, just how fast v and omega are changing
-RV = np.diag([0.5,0.5])*5
+    This simulates the robot smoothly accelerating.
+    :param dt:
+    :param vrange:
+    :param wrange:
+    :param num_points:
+    :return (T, X_true, V, W): The array of times, the true state, and the input functions
+                which return the input at any time t: V(t), W(t)
+    """
 
-# Measurement noise covariance
-# One is the actual statistics of the noise,
-# the other is what we tell the UKF. If the UKF gets too confident,
-# we can increase what it thinks the measurement noise is.
-measurement_noise_actual = np.diag([0.01, 0.001])
-measurement_noise_ukf = np.diag([0.01, 0.001])*10
+    speeds = np.random.uniform(vrange[0], vrange[1], num_points)
+    speeds[0] = 0.5
+    ang_vels = np.random.uniform(wrange[0], wrange[1], num_points)
+    ang_vels[0] = 0
+    times = np.arange(0, num_points) * 3.0  # Stretch out the times a bit
+    V = scipy.interpolate.interp1d(times, speeds)
+    W = scipy.interpolate.interp1d(times, ang_vels)
 
-# Create the UKF object
-# The states are: x,y,heading,v (speed input), omega (turn speed input)
-# We are including v and omega as states because the UKF is going to guess them
-# Normally, v and omega would not be states because the robot simple tells us its inputs.
-ukf = ukflib.UnscentedKalmanFilter(state_size=5,
-                                   process_noise=RV,
-                                   measurement_noise=measurement_noise_ukf,
-                                   init_covariance=np.eye(5)*1e-2,
-                                   init_state=[1,0,0,0.5,0],
-                                   angle_mask=[0,0,1,0,0],
-                                   alpha=0.5)
+    # Right hand side of state-space equations
+    f = lambda x, t: np.array([V(t) * cos(x[2]), V(t) * sin(x[2]), W(t)])
 
+    tf = np.max(times) - 2.0
+    T = np.arange(0, tf, dt)
 
-# Generate a realistic trajectory using numerical integration
-# Suppose the robot smoothly changes its speed and angular velocity
-# Make up some speeds and angular velocities and interpolate between them
-
-# The min/max inputs that the robot receives
-vmin = 0.5
-vmax = 2.0
-wmin = -0.5
-wmax = 0.5
-
-# Generate random inputs at certain time intervals,
-# but smoothly transition between the random inputs
-# This simulates the robot smoothly accelerating.
-num_points = 20
-speeds = np.random.uniform(vmin,vmax,num_points)
-speeds[0] = 0.5
-ang_vels = np.random.uniform(wmin,wmax,num_points)
-ang_vels[0] = 0
-times = np.arange(0,num_points)*3.0  # Stretch out the times a bit
-V = scipy.interpolate.interp1d(times, speeds)
-W = scipy.interpolate.interp1d(times, ang_vels)
-
-# Right hand side of state-space equations
-f = lambda x,t: np.array([V(t)*cos(x[2]), V(t)*sin(x[2]), W(t)])
-
-tf = np.max(times)-2.0
-dt = 0.05
-T = np.arange(0,tf,dt)
-
-# Calculate the ground truth states using numerical integration
-X_true = scipy.integrate.odeint(f, [1, 0, 0], T)
-
-# Make a dict to record some data throughout the UKF run
-d = ddict(lambda: [])
-d["X_true"] = X_true
-
-# Run a prediction and measurement on the UKF for each timestep
-for i, truth in enumerate(X_true):
-    t = T[i]
-
-    # Predict the next state and covariance using our prediction callback
-    ukf.predict(predict_random_inputs, dt, vmin, vmax, wmin, wmax)
-
-    # Generate some fake inputs with noise
-    range = norm(truth)
-    bearing = atan2(truth[1], truth[0])
-    z = np.array([range, bearing])
-    z += np.random.multivariate_normal(np.zeros(2), measurement_noise_actual)
-
-    # Run the update
-    ukf.update(measurement, z)
-
-    # Collect some data about the UKF to plot later
-    d["X_ukf"].append(ukf.state)
-    xy_cov = ukf.covariance[:2,:2]
-    e,_ = np.linalg.eig(xy_cov)
-    # An estimate of the average uncertainty in all directions
-    est_std = np.mean(np.sqrt(e))
-    d["X_cov"].append(est_std)
-
-for k,v in d.items():
-    d[k] = np.array(v)
-
-plt.subplot(1,4,1)
-plt.plot(d["X_true"][:, 0], d["X_true"][:, 1],label="Truth")
-plt.plot(d["X_ukf"][:,0],d["X_ukf"][:,1],label="UKF")
-plt.title("XY")
-plt.legend()
-
-plt.subplot(1,4,2)
-plt.plot(T, d["X_cov"])
-plt.title("Estimated error (average std dev)")
-
-plt.subplot(1,4,3)
-theta_true = d["X_true"][:,2]
-theta_ukf = d["X_ukf"][:,2]
-a_err = np.degrees(ukflib.angular_fix(theta_true - theta_ukf))
-plt.plot(T,a_err)
-plt.title("Orientation error (degrees)")
-
-plt.subplot(1,4,4)
-error = norm(d["X_true"][:,:2] - d["X_ukf"][:,:2], axis=1)
-plt.plot(T,error)
-plt.title("XY Error")
-
-plt.figure()
-plt.subplot(1,2,1)
-plt.plot(T,V(T),label="V true")
-plt.plot(T,d["X_ukf"][:,3],label="V ukf")
-plt.legend()
-
-plt.subplot(1,2,2)
-plt.plot(T,W(T),label="$\omega$ true")
-plt.plot(T,d["X_ukf"][:,4],label="$\omega$ ukf")
-plt.legend()
+    # Calculate the ground truth states using numerical integration
+    X_true = scipy.integrate.odeint(f, [1, 0, 0], T)
+    return T,X_true,V,W
 
 
-plt.show()
+def run_ukf(times,
+            dt,
+            vrange,
+            wrange,
+            true_states,
+            ukf_measurement_noise,
+            ukf_process_noise,
+            alpha,
+            V=None,
+            W=None,
+            plot=False):
+    """
+    Generate fake measurements from the true states
+    Feed these fake inputs into the UKF and return the overall accuracy
+    :param times:
+    :param dt:
+    :param vrange:
+    :param wrange:
+    :param true_states:
+    :param ukf_measurement_noise:
+    :param ukf_process_noise:
+    :param alpha:
+    :param plot:
+    :param V:
+    :param W:
+    :return (avg_error, pctl_error90): the average and 90th
+        percentile XY errors
+    """
+    actual_measurement_noise = np.diag([0.01, 0.001])
 
+    # Create the UKF object
+    # The states are: x,y,heading,v (speed input), omega (turn speed input)
+    # We are including v and omega as states because the UKF is going to guess them
+    # Normally, v and omega would not be states because the robot simple tells us its inputs.
+    ukf = ukflib.UnscentedKalmanFilter(state_size=5,
+                                       process_noise=ukf_process_noise,
+                                       measurement_noise=ukf_measurement_noise,
+                                       init_covariance=np.eye(5) * 1e-2,
+                                       init_state=[1, 0, 0, 0.5, 0],
+                                       angle_mask=[0, 0, 1, 0, 0],
+                                       alpha=alpha,
+                                       repair=True)
+
+    # Make a dict to record some data throughout the UKF run
+    d = ddict(lambda: [])
+    d["X_true"] = true_states
+
+    # Run a prediction and measurement on the UKF for each time step
+    for i, truth in enumerate(true_states):
+        # Predict the next state and covariance using our prediction callback
+        ukf.predict(predict_random_inputs, dt, vrange, wrange)
+
+        # Generate some fake inputs with noise
+        range = norm(truth)
+        bearing = atan2(truth[1], truth[0])
+        z = np.array([range, bearing])
+        z += np.random.multivariate_normal(np.zeros(2), actual_measurement_noise)
+
+        # Run the update
+        ukf.update(measurement, z)
+
+        # Collect some data about the UKF to plot later
+        d["X_ukf"].append(ukf.state)
+        xy_cov = ukf.covariance[:2, :2]
+        e, _ = np.linalg.eig(xy_cov)
+        # An estimate of the average uncertainty in all directions
+        est_std = np.mean(np.sqrt(e))
+        d["X_cov"].append(est_std)
+
+    for k, v in d.items():
+        d[k] = np.array(v)
+    if plot:
+        T = times
+        plt.subplot(1, 4, 1)
+        plt.plot(d["X_true"][:, 0], d["X_true"][:, 1], label="Truth")
+        plt.plot(d["X_ukf"][:, 0], d["X_ukf"][:, 1], label="UKF")
+        plt.title("XY")
+        plt.legend()
+
+        plt.subplot(1, 4, 2)
+        plt.plot(T, d["X_cov"])
+        plt.title("Estimated error (average std dev)")
+
+        plt.subplot(1, 4, 3)
+        theta_true = d["X_true"][:, 2]
+        theta_ukf = d["X_ukf"][:, 2]
+        a_err = np.degrees(ukflib.angular_fix(theta_true - theta_ukf))
+        plt.plot(T, a_err)
+        plt.title("Orientation error (degrees)")
+
+        plt.subplot(1, 4, 4)
+        error = norm(d["X_true"][:, :2] - d["X_ukf"][:, :2], axis=1)
+        plt.plot(T, error)
+        plt.title("XY Error")
+
+        plt.figure()
+        plt.subplot(1, 2, 1)
+        plt.plot(T, V(T), label="V true")
+        plt.plot(T, d["X_ukf"][:, 3], label="V ukf")
+        plt.legend()
+
+        plt.subplot(1, 2, 2)
+        plt.plot(T, W(T), label="$\omega$ true")
+        plt.plot(T, d["X_ukf"][:, 4], label="$\omega$ ukf")
+        plt.legend()
+
+        plt.show()
+    true_xy = d["X_true"][:,:2]
+    est_xy = d["X_ukf"][:,:2]
+    error_xy = norm(true_xy - est_xy, axis=1)
+    error_angle = ukflib.angular_fix(d["X_true"][:,2] - d["X_ukf"][:,2])
+    error = np.array([error_xy, error_angle]).T
+    # Weight it so 1 meter of error is x degrees of angular error
+    weights = np.array([np.radians(90), 1.0])
+    error = error.dot(weights) / sum(weights)
+    avg_error = np.mean(error)
+    pctl_error90 = np.percentile(error, 90)
+    return avg_error, pctl_error90
+
+if __name__=="__main__":
+    import matplotlib.pyplot as plt
+    process_noise = np.diag([6.7,7.1])
+    measurement_noise_ukf = np.diag([0.9, 0.005])
+
+    # The min/max inputs that the robot receives
+    vrange = (0.5,2.0)      # min/max forward speed
+    wrange = (-0.5,0.5)     # min/max angular velocity
+
+    dt = 0.05
+    times, true_state, input_v, input_w = generate_random_trajectory_and_inputs(dt, vrange, wrange)
+    avg,pctl=run_ukf(times,
+            dt,
+            vrange,
+            wrange,
+            true_state,
+            measurement_noise_ukf,
+            process_noise,
+            alpha=0.357,
+            V=input_v,
+            W=input_w,
+            plot=True)
+    print(f"Average error={avg}, 90th percentile error={pctl}")
 

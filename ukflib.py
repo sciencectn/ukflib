@@ -4,19 +4,25 @@ import numpy as np
 import scipy.linalg
 import math
 from math import pi
+import sys
+from numpy.linalg import norm
+import random
 
-def _valid_covariance(M):
+class FilterError(Exception):
+    pass
+
+def _check_covariance(M,output=True):
     """
     Check if the matrix is a valid covariance matrix
     It should be positive definite
     :param M:
     :return:
     """
-    if (np.diag(M) <= 0).any():
-        return False
     try:
         np.linalg.cholesky(M)
-    except np.linalg.LinAlgError:
+    except np.linalg.LinAlgError as e:
+        if output:
+            print(e, file=sys.stderr)
         return False
     return True
 
@@ -29,8 +35,38 @@ def angular_fix(a):
         fix[fix > pi] -= 2*pi
     return fix
 
-class FilterError(Exception):
-    pass
+def repair_covariance(P):
+    assert not np.isnan(P).any()
+    R = P.copy()
+    i=0
+    while not _check_covariance(R,False):
+        if i > 200:
+            print(np.linalg.eigh(R)[0],file=sys.stderr)
+            e, v = np.linalg.eigh(R)
+            R = _repair_bad_eig(R,e,v)
+            print(np.linalg.eigh(R)[0],file=sys.stderr)
+            print(R,file=sys.stderr)
+            raise FilterError("Cannot repair matrix")
+        R = (R + R.T)/2.0    # Force symmetry
+        e,v = np.linalg.eigh(R)
+        R = _repair_bad_eig(R,e,v)  # Remove a bad eigenvalue
+        i += 1
+    # print(i)
+    return R
+
+def _repair_bad_eig(P,eigs,vecs,new_eig=0.01):
+    """
+    Remove negative eigenvalues from a matrix
+    Change the new eigenvalue to 1e-3
+    :param P:
+    :return:
+    """
+    for i,e in enumerate(eigs):
+        if e <= 1e-6:
+            v = vecs[:,i]
+            v /= norm(v)
+            P = P + np.outer(v,v)*(abs(e) + random.uniform(0,new_eig))
+    return P
 
 
 class UnscentedKalmanFilter(object):
@@ -43,12 +79,17 @@ class UnscentedKalmanFilter(object):
                  angle_mask=None,
                  kappa=0,
                  alpha=1.0,
-                 beta=2):
+                 beta=2,
+                 repair=False):
+        assert 0 < alpha <= 1,\
+            f"alpha needs to be in range (0,1], got {alpha}"
+        self._repair_covar = repair
         self._ss = state_size
         self._state = np.zeros(state_size)
         if init_state is not None:
             init_state = np.atleast_1d(init_state)
-            assert len(init_state)==state_size
+            assert len(init_state)==state_size,\
+                "State size does not match initial state"
             self._state[:] = init_state
 
         if init_covariance is None:
@@ -66,9 +107,13 @@ class UnscentedKalmanFilter(object):
 
         process_noise = np.atleast_2d(process_noise)
         measurement_noise = np.atleast_2d(measurement_noise)
-        assert _valid_covariance(process_noise)
-        assert _valid_covariance(measurement_noise)
-        assert _valid_covariance(init_covariance)
+
+        if not _check_covariance(process_noise):
+            raise FilterError("Invalid process noise covariance")
+        if not _check_covariance(measurement_noise):
+            raise FilterError("Invalid measurement noise covariance")
+        if not _check_covariance(init_covariance):
+            raise FilterError("Invalid initial state covariance")
 
         # Process and measurement noise state sizes
         self._sv = process_noise.shape[0]
@@ -144,7 +189,7 @@ class UnscentedKalmanFilter(object):
         """
         if self._P_state=="plus":
             # Any nonlinearities from the predict step will be lost if you update twice in a row
-            # Maybe this is desirable...but for most users it's probably a bug
+            # Maybe someone out there really wants to do this but I'm going to assume it's a bug.
             raise FilterError("You cannot call update twice in a row. "
                               "Multiple updates should be combined into one measurement model. ")
 
@@ -160,6 +205,7 @@ class UnscentedKalmanFilter(object):
             Z[:,j] = zj
         zbar = Z.dot(self._weight_m)
         Pz = self._sigma_pt_covariance(Z,zbar,fix_angles=False)
+        _check_covariance(Pz)
         Pxz = self._sigma_pt_covariance(self._sigma_pts[:self._ss,:],self._state,
                                         pts2=Z,mean2=zbar)
         K = Pxz.dot(np.linalg.inv(Pz))
@@ -175,8 +221,22 @@ class UnscentedKalmanFilter(object):
         Use the Cholesky decomposition to get the sigma points
         :return:
         """
-        M = np.linalg.cholesky(self._Pa)
-        # M = scipy.linalg.sqrtm(self._Pa)
+        try:
+            M = np.linalg.cholesky(self._Pa)
+        except np.linalg.LinAlgError:
+            if not self._repair_covar:
+                raise FilterError(
+                    "The covariance is not positive definite (most likely the filter is way overconfident)."
+                    " Use the option repair=True to force positive definiteness or increase your noise.")
+            self._Pa[:self._ss,:self._ss] = repair_covariance(self._Pa[:self._ss,:self._ss])
+            assert not np.isnan(self._Pa).any()
+            try:
+                M = np.linalg.cholesky(self._Pa)
+            except np.linalg.LinAlgError as e:
+                print(e, file=sys.stderr)
+                print(self._Pa, file=sys.stderr)
+
+
         self._sigma_pts.fill(0)
         for j in range(2*self._sa+1):
             self._sigma_pts[:self._ss,j] = self._state
