@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.com/sciencectn/ukflib.svg?branch=master)](https://travis-ci.com/sciencectn/ukflib)
 
 # ukflib
 An Unscented Kalman Filter library for Python, created as a course project for ECE 722 (Kalman Filtering) at GMU. 
