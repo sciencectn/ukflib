@@ -41,6 +41,9 @@ def repair_covariance(P):
     i=0
     while not _check_covariance(R,False):
         if i > 200:
+            # For some weird reason, this function fails to
+            # repair certain matrices when running in parallel.
+            # My guess is that eigh is not reentrant.
             print(np.linalg.eigh(R)[0],file=sys.stderr)
             e, v = np.linalg.eigh(R)
             R = _repair_bad_eig(R,e,v)
@@ -62,10 +65,10 @@ def _repair_bad_eig(P,eigs,vecs,new_eig=0.01):
     :return:
     """
     for i,e in enumerate(eigs):
-        if e <= 1e-6:
+        if e <= 1e-7:
             v = vecs[:,i]
             v /= norm(v)
-            P = P + np.outer(v,v)*(abs(e) + random.uniform(0,new_eig))
+            P = P + np.outer(v,v)*(abs(e) + random.uniform(1e-3,new_eig))
     return P
 
 
@@ -80,10 +83,10 @@ class UnscentedKalmanFilter(object):
                  kappa=0,
                  alpha=1.0,
                  beta=2,
-                 repair=False):
+                 repair_covariance=False):
         assert 0 < alpha <= 1,\
             f"alpha needs to be in range (0,1], got {alpha}"
-        self._repair_covar = repair
+        self._repair_covar = repair_covariance
         self._ss = state_size
         self._state = np.zeros(state_size)
         if init_state is not None:
@@ -226,8 +229,8 @@ class UnscentedKalmanFilter(object):
         except np.linalg.LinAlgError:
             if not self._repair_covar:
                 raise FilterError(
-                    "The covariance is not positive definite (most likely the filter is way overconfident)."
-                    " Use the option repair=True to force positive definiteness or increase your noise.")
+                    "The covariance is not positive definite (most likely the filter is overconfident)."
+                    " Use the option repair_covariance=True to force positive definiteness or increase your noise.")
             self._Pa[:self._ss,:self._ss] = repair_covariance(self._Pa[:self._ss,:self._ss])
             assert not np.isnan(self._Pa).any()
             try:
