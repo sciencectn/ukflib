@@ -2,12 +2,14 @@
 
 import ukflib
 import numpy as np
-from math import sin,cos, atan2, sqrt, radians
+from math import sin,cos, atan2
+import math
 from numpy.linalg import norm
 import scipy.interpolate
 import scipy.integrate
 import random
 from collections import defaultdict as ddict
+
 
 """
 An example UKF application
@@ -42,14 +44,10 @@ def clip(value, val_range):
     return max(min(value, val_range[1]), val_range[0])
 
 def predict_random_inputs(state, noise, dt, vrange, wrange):
-    v,w = state[3:] + noise*dt
-    v = clip(v,vrange)
-    w = clip(w,wrange)
+    v,w=state[3:]
     next_state = state
     next_state[:3] += get_displacement(state[2],v,w,dt)
-    # next_state[:3] += noise[:3]*dt
-    next_state[3] = v
-    next_state[4] = w
+    next_state[3:] += noise[:3]*dt
     return next_state
 
 
@@ -150,7 +148,7 @@ def run_ukf(times,
                                        init_state=[1, 0, 0, 0.5, 0],
                                        angle_mask=[0, 0, 1, 0, 0],
                                        alpha=alpha,
-                                       repair=True)
+                                       repair_covariance=True)
 
     # Make a dict to record some data throughout the UKF run
     d = ddict(lambda: [])
@@ -182,38 +180,57 @@ def run_ukf(times,
         d[k] = np.array(v)
     if plot:
         T = times
-        plt.subplot(1, 4, 1)
+        plt.figure(figsize=(13,9))
+        plt.subplot(2, 3, 1)
         plt.plot(d["X_true"][:, 0], d["X_true"][:, 1], label="Truth")
         plt.plot(d["X_ukf"][:, 0], d["X_ukf"][:, 1], label="UKF")
+        plt.scatter([1],[0],s=20.0,label="Start")
         plt.title("XY")
+        plt.xlabel("X (m)")
+        plt.ylabel("Y (m)")
         plt.legend()
 
-        plt.subplot(1, 4, 2)
+        plt.subplot(2, 3, 2)
         plt.plot(T, d["X_cov"])
+        plt.xlabel("Time (s)")
+        plt.ylabel("Error (m)")
         plt.title("Estimated error (average std dev)")
 
-        plt.subplot(1, 4, 3)
+        plt.subplot(2, 3, 6)
         theta_true = d["X_true"][:, 2]
         theta_ukf = d["X_ukf"][:, 2]
         a_err = np.degrees(ukflib.angular_fix(theta_true - theta_ukf))
         plt.plot(T, a_err)
-        plt.title("Orientation error (degrees)")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Error (degrees)")
+        plt.title("Orientation error")
 
-        plt.subplot(1, 4, 4)
+        plt.subplot(2, 3, 3)
         error = norm(d["X_true"][:, :2] - d["X_ukf"][:, :2], axis=1)
         plt.plot(T, error)
+        plt.xlabel("Time (s)")
+        plt.ylabel("Error (m)")
         plt.title("XY Error")
 
-        plt.figure()
-        plt.subplot(1, 2, 1)
+        # plt.figure()
+        plt.subplot(2, 3, 4)
         plt.plot(T, V(T), label="V true")
         plt.plot(T, d["X_ukf"][:, 3], label="V ukf")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Speed (m/s)")
+        plt.title("Estimated input v")
         plt.legend()
 
-        plt.subplot(1, 2, 2)
+        plt.subplot(2, 3, 5)
         plt.plot(T, W(T), label="$\omega$ true")
         plt.plot(T, d["X_ukf"][:, 4], label="$\omega$ ukf")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Angular speed (rads/s)")
+        plt.title("Estimated input $\omega$")
         plt.legend()
+
+        plt.tight_layout(pad=0.1)
+        plt.savefig("unicycle_plot.pdf")
 
         plt.show()
     true_xy = d["X_true"][:,:2]
@@ -230,7 +247,7 @@ def run_ukf(times,
 
 if __name__=="__main__":
     import matplotlib.pyplot as plt
-    process_noise = np.diag([6.7,7.1])
+    process_noise = np.diag([7.0,7.0])
     measurement_noise_ukf = np.diag([0.9, 0.005])
 
     # The min/max inputs that the robot receives
