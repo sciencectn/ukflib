@@ -43,7 +43,7 @@ def repair_covariance(P):
         if i > 200:
             # For some weird reason, this function fails to
             # repair certain matrices when running in parallel.
-            # My guess is that eigh is not reentrant.
+            # My guess is that eigh or cholesky are not reentrant.
             print(np.linalg.eigh(R)[0],file=sys.stderr)
             e, v = np.linalg.eigh(R)
             R = _repair_bad_eig(R,e,v)
