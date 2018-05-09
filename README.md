@@ -10,15 +10,3 @@ All of the equations used are based on Rudolph Van der Merwe's PhD thesis:
 Van Der Merwe, Rudolph. "Sigma-point Kalman filters for 
 probabilistic inference in dynamic state-space models." (2004).
 ```
-
-
-### Table of contents
-[Installation](#ukflib)
-
-
-
-### Installation
-
-
-
-
