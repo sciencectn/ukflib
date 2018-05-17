@@ -6,7 +6,3 @@ install:
   - pip install .
 script: 
   - nosetests
-  - python examples/unicycle_robot.py
-  - python examples/angle.py
-
-
