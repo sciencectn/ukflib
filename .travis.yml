@@ -1,4 +1,8 @@
 language: python
 python:
   - "3.6"
-script: nosetests
+  - "2.7"
+install: 
+  python setup.py install
+script: 
+  - nosetests
