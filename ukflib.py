@@ -1,5 +1,4 @@
-
-
+from __future__ import print_function
 import numpy as np
 import scipy.linalg
 import math
@@ -85,7 +84,7 @@ class UnscentedKalmanFilter(object):
                  beta=2,
                  repair_covariance=False):
         assert 0 < alpha <= 1,\
-            f"alpha needs to be in range (0,1], got {alpha}"
+            "alpha needs to be in range (0,1], got {0}".format(alpha)
         self._repair_covar = repair_covariance
         self._ss = state_size
         self._state = np.zeros(state_size)
@@ -100,7 +99,7 @@ class UnscentedKalmanFilter(object):
         else:
             init_covariance = np.atleast_2d(init_covariance)
             assert init_covariance.shape[0]==state_size,\
-                f"The initial covariance should have the same dimension as the state size"
+                "The initial covariance should have the same dimension as the state size"
 
         self._angle_mask = None
         if angle_mask is not None:

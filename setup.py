@@ -16,6 +16,7 @@ setup(
     url="https://github.com/sciencectn/ukflib",
     classifiers=[
         "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 2.7",
         "Topic :: Scientific/Engineering",
         "Intended Audience :: Science/Research"
     ]

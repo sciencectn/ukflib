@@ -1,4 +1,10 @@
 language: python
 python:
   - "3.6"
-script: nosetests
+  - "2.7"
+script: 
+  - nosetests
+  - python examples/unicycle_robot.py
+  - python examples/angle.py
+
+

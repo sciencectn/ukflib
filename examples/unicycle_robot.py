@@ -1,13 +1,10 @@
-
-
+from __future__ import print_function
 import ukflib
 import numpy as np
 from math import sin,cos, atan2
-import math
 from numpy.linalg import norm
 import scipy.interpolate
 import scipy.integrate
-import random
 from collections import defaultdict as ddict
 
 
@@ -80,9 +77,9 @@ def generate_random_trajectory_and_inputs(dt, vrange, wrange, num_points=20):
     Make up some speeds and angular velocities and interpolate between them
 
     This simulates the robot smoothly accelerating.
-    :param dt:
-    :param vrange:
-    :param wrange:
+    :param dt:  How often to sample the true state
+    :param vrange:  Range of allowable speed inputs  (min,max)
+    :param wrange:  Range of allowable angular velocity inputs  (min,max)
     :param num_points:
     :return (T, X_true, V, W): The array of times, the true state, and the input functions
                 which return the input at any time t: V(t), W(t)
@@ -121,17 +118,18 @@ def run_ukf(times,
     """
     Generate fake measurements from the true states
     Feed these fake inputs into the UKF and return the overall accuracy
-    :param times:
-    :param dt:
-    :param vrange:
-    :param wrange:
-    :param true_states:
-    :param ukf_measurement_noise:
-    :param ukf_process_noise:
-    :param alpha:
-    :param plot:
-    :param V:
-    :param W:
+    :param times: Time values at which true states are sampled
+    :param dt:  Timestep between each time
+    :param vrange:  Tuple, range of speed input used (min,max)
+    :param wrange:  Tuple, range of angular velocity input (min,max)
+    :param true_states: True state of the robot
+    :param ukf_measurement_noise: The measurement noise variances to feed to the UKF.
+                                Not the same as the real measurement noise (tunable)
+    :param ukf_process_noise:   Process noise variances (tunable)
+    :param alpha:   UKF parameter (tunable)
+    :param V:       Function: given t, return the speed
+    :param W:       Function: given t, return angular velocity input
+    :param plot:    Plot the results
     :return (avg_error, pctl_error90): the average and 90th
         percentile XY errors
     """
@@ -238,7 +236,7 @@ def run_ukf(times,
     error_xy = norm(true_xy - est_xy, axis=1)
     error_angle = ukflib.angular_fix(d["X_true"][:,2] - d["X_ukf"][:,2])
     error = np.array([error_xy, error_angle]).T
-    # Weight it so 1 meter of error is x degrees of angular error
+    # Weight it so 1 meter of distance error is x degrees of angular error
     weights = np.array([np.radians(90), 1.0])
     error = error.dot(weights) / sum(weights)
     avg_error = np.mean(error)
@@ -267,5 +265,5 @@ if __name__=="__main__":
             V=input_v,
             W=input_w,
             plot=True)
-    print(f"Average error={avg}, 90th percentile error={pctl}")
+    print("Average error={0}, 90th percentile error={1}".format(avg,pctl))
 
