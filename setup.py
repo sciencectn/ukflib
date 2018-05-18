@@ -1,6 +1,9 @@
 
 from setuptools import setup
+import os
 
+with open(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'DESCRIPTION.rst')) as f:
+    long_description = f.read()
 
 setup(
     name="ukflib",
@@ -8,7 +11,7 @@ setup(
     author_email="sciencectn@gmail.com",
     description="An Unscented Kalman Filter library that allows for nonadditive process and measurement noise",
     keywords="ukf unscented kalman filter",
-    version="0.0.1",
+    version="0.0.3",
     py_modules=["ukflib"],
     install_requires=["numpy>=1.14.0",
                       "matplotlib>=2.2.0",
