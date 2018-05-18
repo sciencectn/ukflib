@@ -10,6 +10,7 @@ setup(
     author="Chris Taylor",
     author_email="sciencectn@gmail.com",
     description="An Unscented Kalman Filter library that allows for nonadditive process and measurement noise",
+    long_description=long_description,
     keywords="ukf unscented kalman filter",
     version="0.0.3",
     py_modules=["ukflib"],
